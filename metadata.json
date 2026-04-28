@@ -1,0 +1,6 @@
+{
+  "name": "OmniChat AI Console",
+  "description": "Plataforma unificada para gestão de chats, conversas inteligentes com RAG e painel administrativo minimalista.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["AI Chat", "RAG Knowledge Base", "Admin Dashboard"]
+}

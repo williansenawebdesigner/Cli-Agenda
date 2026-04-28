@@ -1,0 +1,104 @@
+{
+  "entities": {
+    "Chat": {
+      "title": "Chat Session",
+      "description": "Represents a conversation session between a user and the AI.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the user who owns this chat." },
+        "title": { "type": "string", "description": "Title of the conversation." },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "lastMessage": { "type": "string", "description": "Snippet of the last message." }
+      },
+      "required": ["userId", "title", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Chat Message",
+      "description": "A single message within a chat session.",
+      "type": "object",
+      "properties": {
+        "role": { "type": "string", "enum": ["user", "model"] },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "metadata": { "type": "object", "description": "Optional metadata like RAG context references." }
+      },
+      "required": ["role", "content", "createdAt"]
+    },
+    "Knowledge": {
+      "title": "Knowledge Base Entry",
+      "description": "Information snippet used for Retrieval-Augmented Generation.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "content", "createdAt"]
+    },
+    "Admin": {
+      "title": "Admin User",
+      "description": "User with administrative privileges.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email"]
+    },
+    "WhatsAppInstance": {
+      "title": "WhatsApp Instance",
+      "description": "Evolution API instance details for a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "instanceName": { "type": "string" },
+        "status": { "type": "string" },
+        "apikey": { "type": "string" },
+        "agentId": { "type": "string", "description": "ID of the AI Agent linked to this instance." },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "instanceName", "apikey"]
+    },
+    "Agent": {
+      "title": "AI Agent",
+      "description": "Configuration for an AI Agent.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "systemPrompt": { "type": "string" },
+        "useRAG": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "systemPrompt"]
+    }
+  },
+  "firestore": {
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "User chat sessions."
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages within a session."
+    },
+    "/knowledge/{docId}": {
+      "schema": "Knowledge",
+      "description": "Knowledge base for RAG."
+    },
+    "/admins/{uid}": {
+      "schema": "Admin",
+      "description": "Admin access control list."
+    },
+    "/whatsapp_instances/{uid}": {
+      "schema": "WhatsAppInstance",
+      "description": "WhatsApp instances per user."
+    },
+    "/agents/{agentId}": {
+      "schema": "Agent",
+      "description": "AI Agent configurations."
+    }
+  }
+}
