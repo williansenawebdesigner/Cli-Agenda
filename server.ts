@@ -1,8 +1,8 @@
 import express from "express";
 import path from "path";
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, query, limit, getDocs, doc, setDoc, serverTimestamp, getDoc, addDoc, where } from "firebase/firestore";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getFirestore, collection, query, limit, getDocs, doc, setDoc, serverTimestamp, getDoc, addDoc, where, updateDoc } from "firebase/firestore";
+import { GoogleGenAI } from "@google/genai";
 import fetch from "node-fetch";
 import fs from "fs";
 import { fileURLToPath } from 'url';
@@ -18,7 +18,7 @@ const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp, firebaseConfig.firestoreDatabaseId);
 
 // Initialize Gemini
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 const app = express();
 
@@ -68,8 +68,26 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
             context = knowledgeSnap.docs.map(doc => `[${doc.data().title}]: ${doc.data().content}`).join('\n\n');
           }
 
-          // 4. Generate Answer
-          const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+          // 4. Save User Message to Firestore *First* so it shows up in real time even if AI fails
+          const chatId = remoteJid.replace(/[^a-zA-Z0-9]/g, '_');
+          const chatRef = doc(db, 'chats', chatId);
+          const messagesRef = collection(db, 'chats', chatId, 'messages');
+          
+          await setDoc(chatRef, {
+            userId: instanceData.userId,
+            title: remoteJid.split('@')[0],
+            lastMessage: messageContent, // initially set to user's message
+            updatedAt: serverTimestamp(),
+            whatsappNumber: remoteJid
+          }, { merge: true });
+
+          await addDoc(messagesRef, {
+            content: messageContent,
+            role: 'user',
+            createdAt: serverTimestamp()
+          });
+
+          // 5. Generate Answer with new SDK
           const fullInstruction = `
             ${systemPrompt}
             ${useRAG ? `\n\nUSE THIS CONTEXT IF RELEVANT:\n${context}` : ''}
@@ -77,39 +95,29 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
             Keep answers concise for WhatsApp.
           `;
 
-          const result = await model.generateContent({
+          const result = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
             contents: [{ role: 'user', parts: [{ text: messageContent }] }],
-            systemInstruction: fullInstruction
+            config: {
+              systemInstruction: fullInstruction,
+            }
           });
 
-          const aiResponse = result.response.text();
+          const aiResponse = result.text;
 
-          // 5. Sync to Firestore (Store conversation)
-          const chatId = remoteJid.replace(/[^a-zA-Z0-9]/g, '_');
-          const chatRef = doc(db, 'chats', chatId);
-          await setDoc(chatRef, {
-            userId: instanceData.userId,
-            title: remoteJid.split('@')[0],
+          // 6. Save AI Response
+          await updateDoc(chatRef, {
             lastMessage: aiResponse,
-            updatedAt: serverTimestamp(),
-            whatsappNumber: remoteJid
-          }, { merge: true });
-
-          const messagesRef = collection(db, 'chats', chatId, 'messages');
-          // Add user message
-          await addDoc(messagesRef, {
-            content: messageContent,
-            role: 'user',
-            createdAt: serverTimestamp()
+            updatedAt: serverTimestamp()
           });
-          // Add AI response
+          
           await addDoc(messagesRef, {
             content: aiResponse,
             role: 'model',
             createdAt: serverTimestamp()
           });
 
-          // 6. Send Back to WhatsApp
+          // 7. Send Back to WhatsApp
           const instanceKey = instanceData.apikey;
           const evolutionUrl = process.env.EVOLUTION_API_URL || process.env.VITE_EVOLUTION_API_URL;
 
