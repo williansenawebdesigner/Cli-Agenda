@@ -5,15 +5,14 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, query, limit, getDocs, doc, setDoc, serverTimestamp, getDoc, addDoc, where } from "firebase/firestore";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import fetch from "node-fetch";
-import { readFileSync } from "fs";
+import fs from "fs";
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const configPath = path.join(__dirname, 'firebase-applet-config.json');
-const firebaseConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
+// Fix Vercel loading of the firebase config
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const firebaseConfig = require('./firebase-applet-config.json');
 
 // Initialize Firebase Admin-like on server
 const fbApp = initializeApp(firebaseConfig);
@@ -329,7 +328,9 @@ async function startServer() {
   });
 }
 
-// Only start the server if this file is run directly (not imported)
-if (process.argv[1] === __filename) {
-  startServer();
+if (process.env.NODE_ENV !== "test" && !process.env.VERCEL) {
+  const currentFileURL = typeof import.meta !== 'undefined' && import.meta.url ? fileURLToPath(import.meta.url) : '';
+  if (process.argv[1] === currentFileURL || typeof __filename !== 'undefined' && process.argv[1] === __filename) {
+    startServer();
+  }
 }
