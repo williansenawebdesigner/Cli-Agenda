@@ -16,6 +16,8 @@ export default function ChatInterface({ chatId, user }: { chatId: string, user: 
   const [isIntervening, setIsIntervening] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const [activeInstance, setActiveInstance] = useState<any>(null);
+
   useEffect(() => {
     // Get chat metadata
     const fetchChat = async () => {
@@ -26,6 +28,23 @@ export default function ChatInterface({ chatId, user }: { chatId: string, user: 
     };
     fetchChat();
 
+    // Get active whatsapp instance
+    const fetchInstance = async () => {
+      const { query, collection, where, getDocs } = await import('firebase/firestore');
+      const q = query(collection(db, 'whatsapp_instances'), where('userId', '==', user.uid), where('status', '==', 'open'));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        setActiveInstance(snap.docs[0].data());
+      } else {
+        // Fallback
+        const allSnap = await getDocs(query(collection(db, 'whatsapp_instances'), where('userId', '==', user.uid)));
+        if (!allSnap.empty) {
+          setActiveInstance(allSnap.docs[0].data());
+        }
+      }
+    };
+    fetchInstance();
+
     const q = query(
       collection(db, 'chats', chatId, 'messages'),
       orderBy('createdAt', 'asc')
@@ -34,7 +53,7 @@ export default function ChatInterface({ chatId, user }: { chatId: string, user: 
       setMessages(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Message)));
     });
     return () => unsubscribe();
-  }, [chatId]);
+  }, [chatId, user.uid]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -51,13 +70,23 @@ export default function ChatInterface({ chatId, user }: { chatId: string, user: 
     setSending(true);
 
     try {
-      // 1. Save "user" message (which in this context is the agent/model)
+      if (activeInstance && chatData?.whatsappNumber) {
+        // Send via Evolution API
+        await fetch(`/api/whatsapp/send-message/${activeInstance.instanceName}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'instancekey': activeInstance.apikey
+          },
+          body: JSON.stringify({
+            number: chatData.whatsappNumber,
+            text: userMessage
+          })
+        });
+      }
+
+      // Save "user" message (which in this context is the agent/model)
       await addDoc(collection(db, 'chats', chatId, 'messages'), {
-        // "user" in Gemini usually means the person talking to the model. Wait, if the visitor is talking to us via WhatsApp, the visitor is 'user'. 
-        // In the image: The right-side green bubble belongs to the IA/Agent. Left-side is the contact.
-        // Let's assume role: 'model' is the IA, role: 'user' is the contact. 
-        // Because the dashboard user is manually replying, let's save their message as "model" role for RAG history continuity, or an explicit "agent" role.
-        // We will keep it 'model' to represent our side (green bubble).
         role: 'model', 
         content: userMessage,
         createdAt: serverTimestamp()

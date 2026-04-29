@@ -148,7 +148,7 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
       const host = req.get('host');
       const protocol = req.protocol === 'http' && host.includes('localhost') ? 'http' : 'https';
       const fallbackUrl = `${protocol}://${host}/api/webhooks/whatsapp`;
-      const webhookUrl = process.env.APP_URL ? `${process.env.APP_URL}/api/webhooks/whatsapp` : fallbackUrl;
+      const webhookUrl = process.env.APP_URL ? `${process.env.APP_URL}/api/webhooks/whatsapp?userId=${userId}` : `${fallbackUrl}?userId=${userId}`;
 
       console.log(`Creating instance: ${instanceName} with webhook: ${webhookUrl}`);
 
@@ -211,6 +211,29 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
     } catch (err) {
       console.error("Status fetch proxy error:", err);
       res.status(500).json({ error: "Failed to fetch status" });
+    }
+  });
+
+  app.post("/api/whatsapp/send-message/:instanceName", async (req, res) => {
+    try {
+      const { instanceName } = req.params;
+      const { number, text } = req.body;
+      const instanceKey = req.headers.instancekey;
+      const evolutionUrl = process.env.EVOLUTION_API_URL || process.env.VITE_EVOLUTION_API_URL;
+
+      const response = await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': instanceKey as string
+        },
+        body: JSON.stringify({ number, text })
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch (err) {
+      console.error("Failed to send message:", err);
+      res.status(500).json({ error: "Failed to send message" });
     }
   });
 
@@ -308,9 +331,9 @@ export default app;
 async function startServer() {
   const PORT = 3000;
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const viteModule = await import(/* @vite-ignore */ "vite");
+    const vite = await viteModule.createServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
