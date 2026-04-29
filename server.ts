@@ -59,7 +59,7 @@ async function startServer() {
           let context = "";
           if (useRAG) {
             const knowledgeRef = collection(db, 'knowledge');
-            const q = query(knowledgeRef, limit(10));
+            const q = query(knowledgeRef, where('userId', '==', instanceData.userId), limit(10));
             const knowledgeSnap = await getDocs(q);
             context = knowledgeSnap.docs.map(doc => `[${doc.data().title}]: ${doc.data().content}`).join('\n\n');
           }
@@ -210,15 +210,24 @@ async function startServer() {
       const instanceKey = req.headers.instancekey;
       const evolutionUrl = process.env.EVOLUTION_API_URL || process.env.VITE_EVOLUTION_API_URL;
 
-      const response = await fetch(`${evolutionUrl}/instance/logout/${instanceName}`, {
+      if (!instanceKey || !evolutionUrl) {
+        console.error("Missing instanceKey or evolutionUrl for logout");
+        return res.status(400).json({ error: "Configuração incompleta" });
+      }
+
+      console.log(`Logging out instance: ${instanceName}`);
+
+      const response = await fetch(`${evolutionUrl.replace(/\/$/, '')}/instance/logout/${instanceName}`, {
         method: 'DELETE',
         headers: { 'apikey': instanceKey as string }
       });
+      
       const data = await response.json();
+      console.log("Logout response:", data);
       res.json(data);
     } catch (err) {
       console.error("Logout proxy error:", err);
-      res.status(500).json({ error: "Failed to logout instance" });
+      res.status(500).json({ error: "Failed to logout instance", details: String(err) });
     }
   });
 

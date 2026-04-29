@@ -210,8 +210,7 @@ function ChatList({ selectedId, onSelect, userId }: { selectedId: string | null,
   useEffect(() => {
     const q = query(
       collection(db, 'chats'),
-      where('userId', '==', userId),
-      orderBy('updatedAt', 'desc')
+      where('userId', '==', userId)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChatSession));

@@ -123,14 +123,21 @@ export default function WhatsAppManager({ userId }: { userId: string }) {
     if (!instance || !confirm('Deseja realmente desconectar o WhatsApp?')) return;
     setLoading(true);
     try {
-      await fetch(`/api/whatsapp/logout/${instance.instanceName}`, {
+      const res = await fetch(`/api/whatsapp/logout/${instance.instanceName}`, {
         method: 'DELETE',
         headers: { 'instancekey': instance.apikey }
       });
-      setQrCode(null);
-      checkStatus();
+      const data = await res.json();
+      if (res.ok) {
+        setQrCode(null);
+        checkStatus();
+        alert('WhatsApp desconectado com sucesso.');
+      } else {
+        alert(`Erro ao desconectar: ${data.error || data.details || 'Erro no servidor'}`);
+      }
     } catch (err) {
       console.error(err);
+      alert('Falha na rede ao tentar desconectar. Verifique sua conexão.');
     } finally {
       setLoading(false);
     }
