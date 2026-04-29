@@ -46,37 +46,45 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
           }
 
           const instanceData = instanceDoc.data();
-          let systemPrompt = "You are OmniChat AI, a helpful assistant.";
-          let useRAG = true;
+          let agentData: any = {
+            systemPrompt: "You are OmniChat AI, a helpful assistant.",
+            useRAG: true,
+            responseDelayMs: 0,
+            useTyping: true,
+            callOtherAgents: false
+          };
 
-          // 2. Load Agent config if linked
+          // 2. Load basic Agent config if linked
           if (instanceData.agentId) {
             const agentSnap = await getDoc(doc(db, 'agents', instanceData.agentId));
             if (agentSnap.exists()) {
-              const agentData = agentSnap.data();
-              systemPrompt = agentData.systemPrompt;
-              useRAG = agentData.useRAG;
+               agentData = { ...agentData, ...agentSnap.data() };
             }
           }
 
-          // 3. Fetch Knowledge for RAG if enabled
+          // Fetch Knowledge for RAG if enabled
           let context = "";
-          if (useRAG) {
+          if (agentData.useRAG) {
             const knowledgeRef = collection(db, 'knowledge');
             const q = query(knowledgeRef, where('userId', '==', instanceData.userId), limit(10));
             const knowledgeSnap = await getDocs(q);
             context = knowledgeSnap.docs.map(doc => `[${doc.data().title}]: ${doc.data().content}`).join('\n\n');
           }
 
-          // 4. Save User Message to Firestore *First* so it shows up in real time even if AI fails
+          // Setup Evolution API Constants
+          const evolutionUrl = process.env.EVOLUTION_API_URL || process.env.VITE_EVOLUTION_API_URL;
+          const instanceKey = instanceData.apikey;
+          const targetNumber = remoteJid.split('@')[0];
+
+          // 4. Save User Message to Firestore
           const chatId = remoteJid.replace(/[^a-zA-Z0-9]/g, '_');
           const chatRef = doc(db, 'chats', chatId);
           const messagesRef = collection(db, 'chats', chatId, 'messages');
           
           await setDoc(chatRef, {
             userId: instanceData.userId,
-            title: remoteJid.split('@')[0],
-            lastMessage: messageContent, // initially set to user's message
+            title: targetNumber,
+            lastMessage: messageContent,
             updatedAt: serverTimestamp(),
             whatsappNumber: remoteJid
           }, { merge: true });
@@ -87,23 +95,96 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
             createdAt: serverTimestamp()
           });
 
-          // 5. Generate Answer with new SDK
-          const fullInstruction = `
-            ${systemPrompt}
-            ${useRAG ? `\n\nUSE THIS CONTEXT IF RELEVANT:\n${context}` : ''}
+          // Simulate Typing
+          if (agentData.useTyping) {
+            const delayInMs = agentData.responseDelayMs ? parseInt(agentData.responseDelayMs) : 2000;
+            await fetch(`${evolutionUrl}/message/sendPresence/${instance}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': instanceKey as string },
+              body: JSON.stringify({ number: targetNumber, delay: delayInMs < 1000 ? 2000 : delayInMs, presence: "composing" })
+            }).catch(e => console.error("Presence err:", e));
+          }
+
+          // Build Tools if Agent Routing is allowed
+          let toolsDefinition: any[] = [];
+          let otherAgentsList: any[] = [];
+          if (agentData.callOtherAgents) {
+            const allAgentsSnap = await getDocs(query(collection(db, 'agents'), where('userId', '==', instanceData.userId)));
+            otherAgentsList = allAgentsSnap.docs.filter(d => d.id !== instanceData.agentId).map(d => ({id: d.id, ...d.data()}));
             
-            Keep answers concise for WhatsApp.
+            if (otherAgentsList.length > 0) {
+                 toolsDefinition = [{
+                   functionDeclarations: otherAgentsList.map(ag => ({
+                     name: `ask_specialist_${ag.id}`,
+                     description: `Call this to ask specialist: ${ag.name}. Behavior: ${(ag.systemPrompt || '').substring(0, 100)}.`,
+                     parameters: {
+                       type: 'OBJECT',
+                       properties: { instruction: { type: 'STRING', description: 'Question/task for the specialist.' } },
+                       required: ['instruction']
+                     }
+                   }))
+                 }];
+            }
+          }
+
+          // Determine System Prompt
+          const fullInstruction = `
+            ${agentData.systemPrompt}
+            ${agentData.useRAG && context ? `\n\nUSE THIS CONTEXT:\n${context}` : ''}
+            
+            Keep answers conversational and suitable for WhatsApp.
           `;
+
+          const generateContentConfig: any = { systemInstruction: fullInstruction };
+          if (toolsDefinition.length > 0) {
+            generateContentConfig.tools = toolsDefinition;
+          }
+
+          let modelInputs = [{ role: 'user', parts: [{ text: messageContent }] }];
+          let aiResponse = "";
 
           const result = await ai.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: [{ role: 'user', parts: [{ text: messageContent }] }],
-            config: {
-              systemInstruction: fullInstruction,
-            }
+            contents: modelInputs,
+            config: generateContentConfig
           });
 
-          const aiResponse = result.text;
+          if (result.functionCalls && result.functionCalls.length > 0) {
+            // Master Agent wants to call a sub-agent
+            const call = result.functionCalls[0];
+            const calledAgentId = call.name.replace('ask_specialist_', '');
+            const instruction = (call.args as any).instruction;
+            
+            const subAgent = otherAgentsList.find(a => a.id === calledAgentId);
+            if (subAgent) {
+               const subAgentInstruction = `
+                 ${subAgent.systemPrompt}
+                 ${subAgent.useRAG && context ? `\n\nCONTEXT:\n${context}` : ''}
+               `;
+               const subResult = await ai.models.generateContent({
+                 model: "gemini-2.5-flash",
+                 contents: [{ role: 'user', parts: [{ text: instruction }] }],
+                 config: { systemInstruction: subAgentInstruction }
+               });
+               
+               // In a simpler setup, the sub-agent's response is the final response. 
+               // Or we return it to the Master. Let's just use it as the final response to save time/tokens.
+               aiResponse = subResult.text || "Sub-agent failed to respond.";
+               // To make it clear in UI
+               aiResponse = `*[${subAgent.name}]* \n\n` + aiResponse;
+            } else {
+               aiResponse = "I tried to consult a specialist but couldn't find them.";
+            }
+
+          } else {
+            // Normal response
+            aiResponse = result.text || "";
+          }
+
+          // Apply Delay
+          if (agentData.responseDelayMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, parseInt(agentData.responseDelayMs)));
+          }
 
           // 6. Save AI Response
           await updateDoc(chatRef, {
@@ -118,9 +199,6 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
           });
 
           // 7. Send Back to WhatsApp
-          const instanceKey = instanceData.apikey;
-          const evolutionUrl = process.env.EVOLUTION_API_URL || process.env.VITE_EVOLUTION_API_URL;
-
           await fetch(`${evolutionUrl}/message/sendText/${instance}`, {
             method: 'POST',
             headers: {
@@ -128,7 +206,7 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
               'apikey': instanceKey as string
             },
             body: JSON.stringify({
-              number: remoteJid.split('@')[0],
+              number: targetNumber,
               text: aiResponse,
               delay: 1000
             })

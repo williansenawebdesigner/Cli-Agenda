@@ -14,6 +14,9 @@ export default function AgentManager({ userId }: { userId: string }) {
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
   const [useRAG, setUseRAG] = useState(true);
+  const [responseDelayMs, setResponseDelayMs] = useState(0);
+  const [useTyping, setUseTyping] = useState(true);
+  const [callOtherAgents, setCallOtherAgents] = useState(false);
 
   useEffect(() => {
     const q = query(collection(db, 'agents'), where('userId', '==', userId));
@@ -31,7 +34,10 @@ export default function AgentManager({ userId }: { userId: string }) {
       await updateDoc(doc(db, 'agents', editingId), {
         name,
         systemPrompt: prompt,
-        useRAG
+        useRAG,
+        responseDelayMs,
+        useTyping,
+        callOtherAgents
       });
       setSelectedId(null);
     } else {
@@ -40,6 +46,9 @@ export default function AgentManager({ userId }: { userId: string }) {
         name,
         systemPrompt: prompt,
         useRAG,
+        responseDelayMs,
+        useTyping,
+        callOtherAgents,
         createdAt: serverTimestamp()
       });
     }
@@ -47,6 +56,9 @@ export default function AgentManager({ userId }: { userId: string }) {
     setName('');
     setPrompt('');
     setUseRAG(true);
+    setResponseDelayMs(0);
+    setUseTyping(true);
+    setCallOtherAgents(false);
     setIsAdding(false);
   };
 
@@ -55,6 +67,9 @@ export default function AgentManager({ userId }: { userId: string }) {
     setName(agent.name);
     setPrompt(agent.systemPrompt);
     setUseRAG(agent.useRAG);
+    setResponseDelayMs(agent.responseDelayMs ?? 0);
+    setUseTyping(agent.useTyping ?? true);
+    setCallOtherAgents(agent.callOtherAgents ?? false);
     setIsAdding(true);
   };
 
@@ -104,7 +119,7 @@ export default function AgentManager({ userId }: { userId: string }) {
                       className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-[5px] text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
                     />
                   </div>
-                  <div className="flex items-center pt-6">
+                  <div className="flex flex-col pt-6 gap-3">
                     <label className="flex items-center gap-3 cursor-pointer group">
                       <div className="relative">
                         <input 
@@ -118,7 +133,52 @@ export default function AgentManager({ userId }: { userId: string }) {
                       </div>
                       <span className="text-sm font-medium text-gray-700 group-hover:text-emerald-700 transition-colors">Usar Base de Conhecimento (RAG)</span>
                     </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <div className="relative">
+                        <input 
+                          type="checkbox" 
+                          checked={useTyping} 
+                          onChange={(e) => setUseTyping(e.target.checked)} 
+                          className="sr-only"
+                        />
+                        <div className={`w-10 h-5 rounded-full transition-colors ${useTyping ? 'bg-emerald-500' : 'bg-gray-300'}`}></div>
+                        <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${useTyping ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                      </div>
+                      <span className="text-sm font-medium text-gray-700 group-hover:text-emerald-700 transition-colors">Simular "Digitando..."</span>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <div className="relative">
+                        <input 
+                          type="checkbox" 
+                          checked={callOtherAgents} 
+                          onChange={(e) => setCallOtherAgents(e.target.checked)} 
+                          className="sr-only"
+                        />
+                        <div className={`w-10 h-5 rounded-full transition-colors ${callOtherAgents ? 'bg-emerald-500' : 'bg-gray-300'}`}></div>
+                        <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${callOtherAgents ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium text-gray-700 group-hover:text-emerald-700 transition-colors">Supervisor de Agentes</span>
+                        <span className="text-[10px] text-gray-500">Pode acionar outros agentes como ferramentas para especialidades.</span>
+                      </div>
+                    </label>
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase mb-2">Atraso na Resposta (segundos)</label>
+                  <input 
+                    type="number" 
+                    value={responseDelayMs / 1000}
+                    onChange={(e) => setResponseDelayMs(parseFloat(e.target.value) * 1000 || 0)}
+                    min="0"
+                    step="0.5"
+                    placeholder="0" 
+                    className="w-full md:w-1/3 px-4 py-2.5 bg-white border border-gray-200 rounded-[5px] text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">Simula o tempo que uma pessoa levaria para ler e responder.</p>
                 </div>
 
                 <div>
@@ -173,10 +233,19 @@ export default function AgentManager({ userId }: { userId: string }) {
                     <h3 className="font-bold text-gray-900 group-hover:text-emerald-700 transition-colors">{agent.name}</h3>
                     <div className="flex items-center gap-2 mt-1">
                       {agent.useRAG ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-[5px] text-[9px] font-bold bg-emerald-100 text-emerald-700 uppercase tracking-tighter">RAG Ativo</span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-[5px] text-[9px] font-bold bg-emerald-100 text-emerald-700 uppercase tracking-tighter">RAG</span>
                       ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-[5px] text-[9px] font-bold bg-gray-100 text-gray-500 uppercase tracking-tighter">Apenas Prompt</span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-[5px] text-[9px] font-bold bg-gray-100 text-gray-500 uppercase tracking-tighter">S/ RAG</span>
                       )}
+                      {agent.callOtherAgents && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-[5px] text-[9px] font-bold bg-blue-100 text-blue-700 uppercase tracking-tighter">Supervisor</span>
+                      )}
+                      {agent.useTyping && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-[5px] text-[9px] font-bold bg-purple-100 text-purple-700 uppercase tracking-tighter">Typing</span>
+                      )}
+                      {agent.responseDelayMs ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-[5px] text-[9px] font-bold bg-amber-100 text-amber-700 uppercase tracking-tighter">{agent.responseDelayMs / 1000}s Delay</span>
+                      ) : null}
                     </div>
                   </div>
                 </div>

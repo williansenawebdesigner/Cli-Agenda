@@ -76,5 +76,8 @@ export interface AIAgent {
   name: string;
   systemPrompt: string;
   useRAG: boolean;
+  responseDelayMs?: number;
+  useTyping?: boolean;
+  callOtherAgents?: boolean;
   createdAt: any;
 }
