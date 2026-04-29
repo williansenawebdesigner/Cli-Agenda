@@ -2,10 +2,11 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, query, limit, getDocs, doc, setDoc, serverTimestamp, getDoc, addDoc } from "firebase/firestore";
+import { getFirestore, collection, query, limit, getDocs, doc, setDoc, serverTimestamp, getDoc, addDoc, where } from "firebase/firestore";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import fetch from "node-fetch";
-import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
+import { readFileSync } from "fs";
+const firebaseConfig = JSON.parse(readFileSync('./firebase-applet-config.json', 'utf-8'));
 
 // Initialize Firebase Admin-like on server
 const fbApp = initializeApp(firebaseConfig);
@@ -29,7 +30,7 @@ async function startServer() {
       const remoteJid = data.key.remoteJid;
       const messageContent = data.message?.conversation || data.message?.extendedTextMessage?.text;
 
-      if (messageContent) {
+      if (messageContent && typeof messageContent === 'string' && messageContent.trim()) {
         try {
           // 1. Find Instance to get active Agent
           // In a real multi-user app, we'd query whatsapp_instances by instanceName
@@ -141,7 +142,14 @@ async function startServer() {
 
       console.log(`Creating instance: ${instanceName} for user: ${userId}`);
 
-      const response = await fetch(`${evolutionUrl}/instance/create`, {
+      const host = req.get('host');
+      const protocol = req.protocol === 'http' && host.includes('localhost') ? 'http' : 'https';
+      const fallbackUrl = `${protocol}://${host}/api/webhooks/whatsapp`;
+      const webhookUrl = process.env.APP_URL ? `${process.env.APP_URL}/api/webhooks/whatsapp` : fallbackUrl;
+
+      console.log(`Creating instance: ${instanceName} with webhook: ${webhookUrl}`);
+
+      const response = await fetch(`${evolutionUrl.replace(/\/$/, '')}/instance/create`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -153,7 +161,7 @@ async function startServer() {
           qrcode: true,
           webhook: {
             enabled: true,
-            url: `${process.env.APP_URL}/api/webhooks/whatsapp`,
+            url: webhookUrl,
             events: ["MESSAGES_UPSERT"]
           }
         })
@@ -228,6 +236,49 @@ async function startServer() {
     } catch (err) {
       console.error("Logout proxy error:", err);
       res.status(500).json({ error: "Failed to logout instance", details: String(err) });
+    }
+  });
+
+  app.delete("/api/whatsapp/delete-instance/:instanceName", async (req, res) => {
+    try {
+      const { instanceName } = req.params;
+      const globalKey = process.env.EVOLUTION_GLOBAL_API_KEY;
+      const evolutionUrl = process.env.EVOLUTION_API_URL || process.env.VITE_EVOLUTION_API_URL;
+
+      if (!globalKey) {
+        console.error("EVOLUTION_GLOBAL_API_KEY is not set");
+        return res.status(500).json({ error: "Chave global da API não configurada no servidor." });
+      }
+
+      const url = `${evolutionUrl.replace(/\/$/, '')}/instance/delete/${instanceName}`;
+      console.log(`Sending DELETE request to Evolution API: ${url}`);
+
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'apikey': globalKey as string }
+      });
+
+      const responseText = await response.text();
+      console.log(`Evolution API Delete response (${response.status}):`, responseText);
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        data = { message: responseText };
+      }
+
+      if (!response.ok) {
+        return res.status(response.status).json({ 
+          error: "Falha na Evolution API ao excluir instância", 
+          details: data.message || responseText 
+        });
+      }
+
+      res.json(data);
+    } catch (err) {
+      console.error("Delete instance proxy error:", err);
+      res.status(500).json({ error: "Internal server error during instance deletion", details: String(err) });
     }
   });
 

@@ -92,9 +92,9 @@
       "schema": "Admin",
       "description": "Admin access control list."
     },
-    "/whatsapp_instances/{uid}": {
+    "/whatsapp_instances/{instanceId}": {
       "schema": "WhatsAppInstance",
-      "description": "WhatsApp instances per user."
+      "description": "WhatsApp instances registered in the system."
     },
     "/agents/{agentId}": {
       "schema": "Agent",

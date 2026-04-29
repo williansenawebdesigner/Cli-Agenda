@@ -52,8 +52,9 @@ service cloud.firestore {
     }
 
     // WhatsApp Instance Rules
-    match /whatsapp_instances/{uid} {
-      allow read, write: if isOwner(uid) || isAdmin();
+    match /whatsapp_instances/{instanceId} {
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow read, update, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
     }
 
     // Agent Rules

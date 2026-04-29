@@ -24,6 +24,16 @@ export interface FirestoreErrorInfo {
   }
 }
 
+export interface Client {
+  id: string;
+  userId: string;
+  name: string;
+  phone: string;
+  email: string;
+  status: 'Ativo' | 'Inativo';
+  createdAt?: any;
+}
+
 export interface ChatSession {
   id: string;
   userId: string;
@@ -53,6 +63,7 @@ export interface WhatsAppInstance {
   id: string;
   userId: string;
   instanceName: string;
+  name: string; // Friendly name for display
   status: 'open' | 'close' | 'connecting';
   apikey: string;
   agentId?: string;
