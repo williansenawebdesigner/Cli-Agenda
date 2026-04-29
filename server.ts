@@ -6,7 +6,14 @@ import { getFirestore, collection, query, limit, getDocs, doc, setDoc, serverTim
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import fetch from "node-fetch";
 import { readFileSync } from "fs";
-const firebaseConfig = JSON.parse(readFileSync('./firebase-applet-config.json', 'utf-8'));
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const configPath = path.join(__dirname, 'firebase-applet-config.json');
+const firebaseConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
 
 // Initialize Firebase Admin-like on server
 const fbApp = initializeApp(firebaseConfig);
@@ -15,14 +22,12 @@ const db = getFirestore(fbApp, firebaseConfig.firestoreDatabaseId);
 // Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const app = express();
 
-  app.use(express.json());
+app.use(express.json());
 
-  // Evolution API Webhook Endpoint
-  app.post("/api/webhooks/whatsapp", async (req, res) => {
+// Evolution API Webhook Endpoint
+app.post("/api/webhooks/whatsapp", async (req, res) => {
     const { event, instance, data } = req.body;
     console.log(`Received Webhook: ${event} from instance ${instance}`);
 
@@ -300,6 +305,10 @@ async function startServer() {
     }
   });
 
+export default app;
+
+async function startServer() {
+  const PORT = 3000;
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -320,4 +329,7 @@ async function startServer() {
   });
 }
 
-startServer();
+// Only start the server if this file is run directly (not imported)
+if (process.argv[1] === __filename) {
+  startServer();
+}
