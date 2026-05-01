@@ -11,12 +11,14 @@ import WhatsAppManager from './components/WhatsApp.tsx';
 import AgentManager from './components/Agents.tsx';
 import ClientsManager from './components/Clients.tsx';
 import ReportsManager from './components/Reports.tsx';
+import CatalogsManager from './components/Catalogs.tsx';
+import CalendarManager from './components/Calendar.tsx';
 import { ChatSession } from './types.ts';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'chats' | 'admin' | 'knowledge' | 'whatsapp' | 'agents' | 'clients' | 'reports'>('chats');
+  const [activeTab, setActiveTab] = useState<'chats' | 'admin' | 'knowledge' | 'whatsapp' | 'agents' | 'clients' | 'reports' | 'catalogs' | 'calendar'>('chats');
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -110,9 +112,15 @@ export default function App() {
                 />
                 <SidebarItem 
                   icon={<SearchCheck size={18} />} 
-                  label="Clientes" 
+                  label="CRM de Leads" 
                   active={activeTab === 'clients'} 
                   onClick={() => setActiveTab('clients')} 
+                />
+                <SidebarItem 
+                  icon={<Calendar size={18} />} 
+                  label="Agenda" 
+                  active={activeTab === 'calendar'} 
+                  onClick={() => setActiveTab('calendar')} 
                 />
                 <SidebarItem 
                   icon={<BarChart2 size={18} />} 
@@ -125,6 +133,12 @@ export default function App() {
               {/* Seção Configuración */}
               <div className="px-4 space-y-1">
                 <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-3 mb-2">Configuração</h3>
+                <SidebarItem 
+                  icon={<FileText size={18} />} 
+                  label="Catálogos e Preços" 
+                  active={activeTab === 'catalogs'} 
+                  onClick={() => setActiveTab('catalogs')} 
+                />
                 <SidebarItem 
                   icon={<Smartphone size={18} />} 
                   label="WhatsApp" 
@@ -213,7 +227,9 @@ export default function App() {
             </div>
           )}
           {activeTab === 'clients' && <ClientsManager userId={user.uid} />}
+          {activeTab === 'calendar' && <CalendarManager userId={user.uid} />}
           {activeTab === 'reports' && <ReportsManager userId={user.uid} />}
+          {activeTab === 'catalogs' && <CatalogsManager userId={user.uid} />}
           {activeTab === 'admin' && <AdminPanel />}
           {activeTab === 'agents' && <AgentManager userId={user.uid} />}
           {activeTab === 'knowledge' && <KnowledgeBase isAdmin={isAdmin} />}

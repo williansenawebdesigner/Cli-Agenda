@@ -1,18 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/firebase.ts';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
-import { Search, UserPlus, Filter, MoreHorizontal, Mail, Phone, Calendar, Trash2, Edit2, X } from 'lucide-react';
+import { Search, UserPlus, Filter, MoreHorizontal, Mail, Phone, Calendar, Trash2, Edit2, X, Trello, List } from 'lucide-react';
 import { Client } from '../types.ts';
 import { motion, AnimatePresence } from 'motion/react';
+
+const STAGES = [
+  { id: 'lead', title: 'Novos Leads', color: 'bg-blue-100 text-blue-800 border-blue-200' },
+  { id: 'contacted', title: 'Contatados', color: 'bg-amber-100 text-amber-800 border-amber-200' },
+  { id: 'negotiating', title: 'Em Negociação', color: 'bg-purple-100 text-purple-800 border-purple-200' },
+  { id: 'won', title: 'Ganhos', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  { id: 'lost', title: 'Perdidos', color: 'bg-red-100 text-red-800 border-red-200' }
+];
 
 export default function ClientsManager({ userId }: { userId: string }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [search, setSearch] = useState('');
+  const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
   
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
-  const [formData, setFormData] = useState({ name: '', phone: '', email: '', status: 'Ativo' as 'Ativo' | 'Inativo' });
+  const [formData, setFormData] = useState({ name: '', phone: '', email: '', status: 'Ativo' as 'Ativo' | 'Inativo', stage: 'lead' });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -38,13 +47,13 @@ export default function ClientsManager({ userId }: { userId: string }) {
 
   const openAddModal = () => {
     setEditingClient(null);
-    setFormData({ name: '', phone: '', email: '', status: 'Ativo' });
+    setFormData({ name: '', phone: '', email: '', status: 'Ativo', stage: 'lead' });
     setIsModalOpen(true);
   };
 
   const openEditModal = (client: Client) => {
     setEditingClient(client);
-    setFormData({ name: client.name || '', phone: client.phone || '', email: client.email || '', status: client.status || 'Ativo' });
+    setFormData({ name: client.name || '', phone: client.phone || '', email: client.email || '', status: client.status || 'Ativo', stage: client.stage || 'lead' });
     setIsModalOpen(true);
   };
 
@@ -80,7 +89,7 @@ export default function ClientsManager({ userId }: { userId: string }) {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(`Deseja realmente remover o cliente ${name}?`)) return;
+    if (!window.confirm(`Deseja realmente remover o lead ${name}?`)) return;
     try {
       await deleteDoc(doc(db, 'clients', id));
     } catch (error) {
@@ -89,48 +98,110 @@ export default function ClientsManager({ userId }: { userId: string }) {
     }
   };
 
-  return (
-    <div className="flex-1 flex flex-col h-full bg-white p-6 sm:p-10 overflow-y-auto">
-      <div className="max-w-6xl mx-auto w-full">
-        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Clientes</h1>
-            <p className="text-sm text-gray-500 mt-1">Gestão de contatos e clientes da agenda</p>
-          </div>
-          <button 
-            onClick={openAddModal}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
-          >
-            <UserPlus size={16} />
-            Novo Cliente
-          </button>
-        </header>
+  const changeStage = async (id: string, newStage: string) => {
+    await updateDoc(doc(db, 'clients', id), { stage: newStage });
+  };
 
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden mb-8">
-          <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row gap-4 items-center justify-between bg-gray-50/50">
-            <div className="relative w-full sm:w-80">
-              <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar clientes por nome, telefone ou email..."
-                className="w-full pl-9 pr-4 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
-              />
+  return (
+    <div className="flex-1 flex flex-col h-full bg-[#f8fafc] p-6 overflow-hidden">
+      <div className="max-w-[1400px] w-full mx-auto flex flex-col h-full">
+        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 shrink-0">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">CRM de Leads</h1>
+            <p className="text-sm text-gray-500 mt-1">Gestão de contatos em formato Kanban</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex bg-white rounded-lg border border-gray-200 p-1 shadow-sm">
+               <button onClick={()=>setViewMode('kanban')} className={`p-1.5 rounded flex items-center justify-center ${viewMode === 'kanban' ? 'bg-gray-100 text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                 <Trello size={16} />
+               </button>
+               <button onClick={()=>setViewMode('list')} className={`p-1.5 rounded flex items-center justify-center ${viewMode === 'list' ? 'bg-gray-100 text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                 <List size={16} />
+               </button>
             </div>
-            <button className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
-              <Filter size={16} />
-              Filtros
+            <button 
+              onClick={openAddModal}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
+            >
+              <UserPlus size={16} />
+              Novo Lead
             </button>
           </div>
+        </header>
 
-          <div className="overflow-x-auto">
+        <div className="flex items-center justify-between gap-4 mb-6 shrink-0">
+           <div className="relative w-full max-w-sm">
+             <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
+             <input
+               type="text"
+               value={search}
+               onChange={(e) => setSearch(e.target.value)}
+               placeholder="Buscar leads..."
+               className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none shadow-sm"
+             />
+           </div>
+        </div>
+
+        {viewMode === 'kanban' && (
+          <div className="flex-1 overflow-x-auto pb-4">
+             <div className="flex gap-4 h-full min-w-max">
+               {STAGES.map(stage => {
+                  const stageClients = filteredClients.filter(c => (c.stage || 'lead') === stage.id);
+                  return (
+                    <div key={stage.id} className="w-80 flex flex-col bg-gray-100/50 rounded-xl border border-gray-200/60 overflow-hidden">
+                       <div className={`px-4 py-3 border-b text-sm font-bold flex items-center justify-between ${stage.color}`}>
+                          <span>{stage.title}</span>
+                          <span className="px-2 py-0.5 bg-white/50 rounded shadow-sm text-xs">{stageClients.length}</span>
+                       </div>
+                       <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                          {stageClients.map(client => (
+                             <div key={client.id} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 group relative">
+                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
+                                  <button onClick={()=>openEditModal(client)} className="p-1 text-gray-400 hover:text-emerald-600"><Edit2 size={12}/></button>
+                                  <button onClick={()=>handleDelete(client.id, client.name)} className="p-1 text-gray-400 hover:text-red-500"><Trash2 size={12}/></button>
+                                </div>
+                                <h4 className="font-bold text-gray-800 text-sm pr-10">{client.name || 'Desconhecido'}</h4>
+                                <p className="text-[11px] text-gray-500 mt-1 truncate">{client.phone || client.email || 'Sem contato'}</p>
+                                
+                                {client.customFields && Object.keys(client.customFields).length > 0 && (
+                                   <div className="mt-2 flex flex-wrap gap-1">
+                                      {Object.entries(client.customFields).slice(0,2).map(([k,v]) => (
+                                         <span key={k} className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 truncate max-w-[120px]">{k}: {String(v)}</span>
+                                      ))}
+                                   </div>
+                                )}
+                                
+                                <div className="mt-4 pt-3 border-t border-gray-50">
+                                   <select 
+                                     value={client.stage || 'lead'} 
+                                     onChange={(e)=>changeStage(client.id, e.target.value)}
+                                     className="w-full text-xs bg-gray-50 border border-gray-100 rounded px-2 py-1 outline-none font-medium text-gray-600 focus:border-emerald-300"
+                                   >
+                                     {STAGES.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+                                   </select>
+                                </div>
+                             </div>
+                          ))}
+                          {stageClients.length === 0 && (
+                             <div className="text-center py-6 text-xs text-gray-400 font-medium italic">Nenhum lead nesta etapa</div>
+                          )}
+                       </div>
+                    </div>
+                  );
+               })}
+             </div>
+          </div>
+        )}
+
+        {viewMode === 'list' && (
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden flex-1 flex flex-col">
+          <div className="overflow-x-auto flex-1">
             <table className="w-full text-left text-sm text-gray-600">
               <thead className="bg-gray-50 text-xs uppercase font-semibold text-gray-500 border-b border-gray-200">
                 <tr>
                   <th className="px-6 py-4">Nome</th>
                   <th className="px-6 py-4">Contato</th>
-                  <th className="px-6 py-4">Data Inclusão</th>
+                  <th className="px-6 py-4">Etapa</th>
                   <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4 text-right">Ações</th>
                 </tr>
@@ -139,7 +210,6 @@ export default function ClientsManager({ userId }: { userId: string }) {
                 {filteredClients.map((client) => {
                   const name = client.name || 'Desconhecido';
                   const initial = name.charAt(0).toUpperCase();
-                  const time = client.createdAt?.toDate?.()?.toLocaleDateString() || 'Recente';
 
                   return (
                     <tr key={client.id} className="hover:bg-gray-50/50 transition-colors">
@@ -167,12 +237,24 @@ export default function ClientsManager({ userId }: { userId: string }) {
                           )}
                           {!client.phone && !client.email && <span className="text-[10px] italic">Sem contatos</span>}
                         </div>
+                        {client.customFields && Object.keys(client.customFields).length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {Object.entries(client.customFields).map(([k, v]) => (
+                               <span key={k} className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium bg-purple-50 text-purple-700 tracking-tight border border-purple-100">
+                                 {k}: {String(v)}
+                               </span>
+                            ))}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-1.5 text-gray-500">
-                          <Calendar size={14} />
-                          {time}
-                        </div>
+                        <select 
+                           value={client.stage || 'lead'} 
+                           onChange={(e)=>changeStage(client.id, e.target.value)}
+                           className="text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 outline-none font-medium text-gray-700 focus:border-emerald-300"
+                        >
+                           {STAGES.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+                        </select>
                       </td>
                       <td className="px-6 py-4">
                         <span className={`px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider rounded-full border ${
@@ -204,17 +286,11 @@ export default function ClientsManager({ userId }: { userId: string }) {
                     </tr>
                   )
                 })}
-                {filteredClients.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
-                      Nenhum cliente encontrado.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
-        </div>
+          </div>
+        )}
       </div>
 
       <AnimatePresence>
@@ -227,7 +303,7 @@ export default function ClientsManager({ userId }: { userId: string }) {
               className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden"
             >
               <div className="flex justify-between items-center p-5 border-b border-gray-100 bg-gray-50/50">
-                <h2 className="text-lg font-bold text-gray-900">{editingClient ? 'Editar Cliente' : 'Novo Cliente'}</h2>
+                <h2 className="text-lg font-bold text-gray-900">{editingClient ? 'Editar Lead' : 'Novo Lead'}</h2>
                 <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 transition-colors">
                   <X size={20} />
                 </button>
@@ -253,7 +329,7 @@ export default function ClientsManager({ userId }: { userId: string }) {
                       type="tel"
                       value={formData.phone}
                       onChange={e => setFormData({...formData, phone: e.target.value})}
-                      placeholder="(11) 99999-9999"
+                      placeholder="DDD + Número"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none text-sm"
                     />
                   </div>
@@ -263,22 +339,34 @@ export default function ClientsManager({ userId }: { userId: string }) {
                       type="email"
                       value={formData.email}
                       onChange={e => setFormData({...formData, email: e.target.value})}
-                      placeholder="joao@email.com"
+                      placeholder="email@exemplo.com"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none text-sm"
                     />
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                  <select
-                    value={formData.status}
-                    onChange={e => setFormData({...formData, status: e.target.value as 'Ativo' | 'Inativo'})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none text-sm"
-                  >
-                    <option value="Ativo">Ativo</option>
-                    <option value="Inativo">Inativo</option>
-                  </select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <select
+                      value={formData.status}
+                      onChange={e => setFormData({...formData, status: e.target.value as 'Ativo' | 'Inativo'})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500/20 outline-none text-sm"
+                    >
+                      <option value="Ativo">Ativo</option>
+                      <option value="Inativo">Inativo</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Etapa no Funil</label>
+                    <select
+                      value={formData.stage}
+                      onChange={e => setFormData({...formData, stage: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500/20 outline-none text-sm"
+                    >
+                       {STAGES.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="pt-4 flex justify-end gap-3 mt-4">
@@ -294,7 +382,7 @@ export default function ClientsManager({ userId }: { userId: string }) {
                     disabled={loading || !formData.name.trim()}
                     className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
                   >
-                    {loading ? 'Salvando...' : 'Salvar Cliente'}
+                    {loading ? 'Salvando...' : 'Salvar Lead'}
                   </button>
                 </div>
               </form>
@@ -305,3 +393,4 @@ export default function ClientsManager({ userId }: { userId: string }) {
     </div>
   );
 }
+

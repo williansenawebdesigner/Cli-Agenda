@@ -17,6 +17,7 @@ export default function AgentManager({ userId }: { userId: string }) {
   const [responseDelayMs, setResponseDelayMs] = useState(0);
   const [useTyping, setUseTyping] = useState(true);
   const [callOtherAgents, setCallOtherAgents] = useState(false);
+  const [toolsEnabled, setToolsEnabled] = useState<string[]>([]);
 
   useEffect(() => {
     const q = query(collection(db, 'agents'), where('userId', '==', userId));
@@ -37,7 +38,8 @@ export default function AgentManager({ userId }: { userId: string }) {
         useRAG,
         responseDelayMs,
         useTyping,
-        callOtherAgents
+        callOtherAgents,
+        tools_enabled: toolsEnabled
       });
       setSelectedId(null);
     } else {
@@ -49,6 +51,7 @@ export default function AgentManager({ userId }: { userId: string }) {
         responseDelayMs,
         useTyping,
         callOtherAgents,
+        tools_enabled: toolsEnabled,
         createdAt: serverTimestamp()
       });
     }
@@ -59,6 +62,7 @@ export default function AgentManager({ userId }: { userId: string }) {
     setResponseDelayMs(0);
     setUseTyping(true);
     setCallOtherAgents(false);
+    setToolsEnabled([]);
     setIsAdding(false);
   };
 
@@ -70,6 +74,7 @@ export default function AgentManager({ userId }: { userId: string }) {
     setResponseDelayMs(agent.responseDelayMs ?? 0);
     setUseTyping(agent.useTyping ?? true);
     setCallOtherAgents(agent.callOtherAgents ?? false);
+    setToolsEnabled(agent.tools_enabled || []);
     setIsAdding(true);
   };
 
@@ -162,6 +167,46 @@ export default function AgentManager({ userId }: { userId: string }) {
                       <div className="flex flex-col">
                         <span className="text-sm font-medium text-gray-700 group-hover:text-emerald-700 transition-colors">Supervisor de Agentes</span>
                         <span className="text-[10px] text-gray-500">Pode acionar outros agentes como ferramentas para especialidades.</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <div className="relative">
+                        <input 
+                          type="checkbox" 
+                          checked={toolsEnabled.includes('save_client_field')} 
+                          onChange={(e) => setToolsEnabled(e.target.checked 
+                            ? [...toolsEnabled, 'save_client_field'] 
+                            : toolsEnabled.filter(t => t !== 'save_client_field')
+                          )} 
+                          className="sr-only"
+                        />
+                        <div className={`w-10 h-5 rounded-full transition-colors ${toolsEnabled.includes('save_client_field') ? 'bg-emerald-500' : 'bg-gray-300'}`}></div>
+                        <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${toolsEnabled.includes('save_client_field') ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium text-gray-700 group-hover:text-emerald-700 transition-colors">Extração de Dados (CRM)</span>
+                        <span className="text-[10px] text-gray-500">Permite extrair dados como nome e email durante a conversa.</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <div className="relative">
+                        <input 
+                          type="checkbox" 
+                          checked={toolsEnabled.includes('get_catalog')} 
+                          onChange={(e) => setToolsEnabled(e.target.checked 
+                            ? [...toolsEnabled, 'get_catalog'] 
+                            : toolsEnabled.filter(t => t !== 'get_catalog')
+                          )} 
+                          className="sr-only"
+                        />
+                        <div className={`w-10 h-5 rounded-full transition-colors ${toolsEnabled.includes('get_catalog') ? 'bg-emerald-500' : 'bg-gray-300'}`}></div>
+                        <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${toolsEnabled.includes('get_catalog') ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium text-gray-700 group-hover:text-emerald-700 transition-colors">Catálogo de Serviços</span>
+                        <span className="text-[10px] text-gray-500">Acesso automático a serviços e preços na tela "Catálogos".</span>
                       </div>
                     </label>
                   </div>

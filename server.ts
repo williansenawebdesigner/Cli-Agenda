@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, query, limit, getDocs, doc, setDoc, serverTimestamp, getDoc, addDoc, where, updateDoc } from "firebase/firestore";
+import { getFirestore, collection, query, limit, getDocs, doc, setDoc, serverTimestamp, getDoc, addDoc, where, updateDoc, orderBy } from "firebase/firestore";
 import { GoogleGenAI } from "@google/genai";
 import fetch from "node-fetch";
 import fs from "fs";
@@ -51,7 +51,9 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
             useRAG: true,
             responseDelayMs: 0,
             useTyping: true,
-            callOtherAgents: false
+            callOtherAgents: false,
+            tools_enabled: [],
+            catalogs: []
           };
 
           // 2. Load basic Agent config if linked
@@ -83,7 +85,7 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
           
           await setDoc(chatRef, {
             userId: instanceData.userId,
-            title: targetNumber,
+            title: data.message?.pushName || targetNumber,
             lastMessage: messageContent,
             updatedAt: serverTimestamp(),
             whatsappNumber: remoteJid
@@ -92,8 +94,26 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
           await addDoc(messagesRef, {
             content: messageContent,
             role: 'user',
-            createdAt: serverTimestamp()
+             createdAt: serverTimestamp()
           });
+
+          // 5. Automatically create/update Client in CRM
+          const clientsRef = collection(db, 'clients');
+          const clientsQ = query(clientsRef, where('userId', '==', instanceData.userId), where('phone', '==', targetNumber));
+          const clientsSnap = await getDocs(clientsQ);
+          
+          if (clientsSnap.empty) {
+             const pushName = data.message?.pushName || targetNumber;
+             await addDoc(clientsRef, {
+                 userId: instanceData.userId,
+                 name: pushName,
+                 phone: targetNumber,
+                 email: '',
+                 status: 'Ativo',
+                 stage: 'lead',
+                 createdAt: serverTimestamp()
+             });
+          }
 
           // Simulate Typing
           if (agentData.useTyping) {
@@ -127,6 +147,44 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
             }
           }
 
+          // Base function declarations
+          const baseFunctions = [];
+          
+          if (agentData.tools_enabled && agentData.tools_enabled.includes('save_client_field')) {
+            baseFunctions.push({
+              name: 'save_client_field',
+              description: 'Saves extracted information. Used to update name, email, or stage in CRM. Available STAGES: lead, contacted, negotiating, won, lost. Use this to advance the conversation flow in the CRM!',
+              parameters: {
+                type: 'OBJECT',
+                properties: {
+                  fieldName: { type: 'STRING', description: 'Name of the field (e.g., name, email, stage)' },
+                  value: { type: 'STRING', description: 'Extracted value (e.g., "joão", "contacted")' }
+                },
+                required: ['fieldName', 'value']
+              }
+            });
+          }
+
+          if (agentData.tools_enabled && agentData.tools_enabled.includes('get_catalog')) {
+            baseFunctions.push({
+              name: 'get_catalog',
+              description: 'Retrieve the services, items and prices list.',
+              parameters: {
+                type: 'OBJECT',
+                properties: { query: { type: 'STRING', description: 'Optional search term.' } }
+              }
+            });
+          }
+
+          if (baseFunctions.length > 0) {
+             const existToolsIndex = toolsDefinition.findIndex(t => t.functionDeclarations);
+             if (existToolsIndex >= 0) {
+                 toolsDefinition[existToolsIndex].functionDeclarations.push(...baseFunctions);
+             } else {
+                 toolsDefinition.push({ functionDeclarations: baseFunctions });
+             }
+          }
+
           // Determine System Prompt
           const fullInstruction = `
             ${agentData.systemPrompt}
@@ -140,46 +198,127 @@ app.post("/api/webhooks/whatsapp", async (req, res) => {
             generateContentConfig.tools = toolsDefinition;
           }
 
-          let modelInputs = [{ role: 'user', parts: [{ text: messageContent }] }];
-          let aiResponse = "";
-
-          const result = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: modelInputs,
-            config: generateContentConfig
+          // Prepare Conversation Context
+          const messagesSnap = await getDocs(query(messagesRef, orderBy('createdAt', 'asc'), limit(20)));
+          const conversationHistory = messagesSnap.docs.map(d => {
+            const data = d.data();
+            return {
+              role: data.role === 'user' ? 'user' : 'model',
+              parts: [{ text: data.content || " " }]
+            };
           });
+          
+          let modelInputs: any[] = [...conversationHistory, { role: 'user', parts: [{ text: messageContent }] }];
+          let aiResponse = "";
+          let iterations = 0;
 
-          if (result.functionCalls && result.functionCalls.length > 0) {
-            // Master Agent wants to call a sub-agent
-            const call = result.functionCalls[0];
-            const calledAgentId = call.name.replace('ask_specialist_', '');
-            const instruction = (call.args as any).instruction;
-            
-            const subAgent = otherAgentsList.find(a => a.id === calledAgentId);
-            if (subAgent) {
-               const subAgentInstruction = `
-                 ${subAgent.systemPrompt}
-                 ${subAgent.useRAG && context ? `\n\nCONTEXT:\n${context}` : ''}
-               `;
-               const subResult = await ai.models.generateContent({
-                 model: "gemini-2.5-flash",
-                 contents: [{ role: 'user', parts: [{ text: instruction }] }],
-                 config: { systemInstruction: subAgentInstruction }
-               });
-               
-               // In a simpler setup, the sub-agent's response is the final response. 
-               // Or we return it to the Master. Let's just use it as the final response to save time/tokens.
-               aiResponse = subResult.text || "Sub-agent failed to respond.";
-               // To make it clear in UI
-               aiResponse = `*[${subAgent.name}]* \n\n` + aiResponse;
+          while (iterations < 3) {
+            iterations++;
+            const result = await ai.models.generateContent({
+              model: "gemini-2.5-flash",
+              contents: modelInputs,
+              config: generateContentConfig
+            });
+
+            if (result.functionCalls && result.functionCalls.length > 0) {
+              const call = result.functionCalls[0];
+              let functionResultData = {};
+
+              // Append model's call to history
+              modelInputs.push({
+                role: "model",
+                parts: [{ functionCall: call }]
+              });
+
+              if (call.name === 'save_client_field') {
+                 const args = call.args as any;
+                 
+                 // Look up client by phone
+                 const clientsSnap = await getDocs(query(collection(db, 'clients'), where('userId', '==', instanceData.userId), where('phone', '==', targetNumber), limit(1)));
+                 if (!clientsSnap.empty) {
+                    const clientDoc = clientsSnap.docs[0];
+                    const knownFields = ['name', 'email', 'stage', 'status'];
+                    let updateData: any = { updatedAt: serverTimestamp() };
+                    
+                    if (knownFields.includes(args.fieldName)) {
+                       updateData[args.fieldName] = args.value;
+                    } else {
+                       updateData[`customFields.${args.fieldName}`] = args.value;
+                    }
+                    
+                    await updateDoc(doc(db, 'clients', clientDoc.id), updateData);
+                    functionResultData = { success: true, message: `Saved ${args.value} to ${args.fieldName}` };
+                 } else {
+                    // Create client
+                    const knownFields = ['name', 'email', 'stage', 'status'];
+                    let newClient: any = {
+                      name: targetNumber,
+                      phone: targetNumber,
+                      userId: instanceData.userId,
+                      status: 'Ativo',
+                      stage: 'lead',
+                      createdAt: serverTimestamp()
+                    };
+                    
+                    if (knownFields.includes(args.fieldName)) {
+                       newClient[args.fieldName] = args.value;
+                    } else {
+                       newClient.customFields = { [args.fieldName]: args.value };
+                    }
+                    await addDoc(collection(db, 'clients'), newClient);
+                    functionResultData = { success: true, message: "Client created and data saved." };
+                 }
+
+              } else if (call.name === 'get_catalog') {
+                 const catalogsLists = [];
+                 if (agentData.catalogs && agentData.catalogs.length > 0) {
+                     for (let cId of agentData.catalogs) {
+                        const catSnap = await getDoc(doc(db, 'catalogs', cId));
+                        if(catSnap.exists()){
+                           catalogsLists.push(catSnap.data());
+                        }
+                     }
+                 } else {
+                     const allCatalogs = await getDocs(query(collection(db, 'catalogs'), where('userId', '==', instanceData.userId)));
+                     allCatalogs.docs.forEach(c => catalogsLists.push(c.data()));
+                 }
+                 functionResultData = { catalogs: catalogsLists };
+
+              } else if (call.name.startsWith('ask_specialist_')) {
+                  const calledAgentId = call.name.replace('ask_specialist_', '');
+                  const instruction = (call.args as any).instruction;
+                  
+                  const subAgent = otherAgentsList.find(a => a.id === calledAgentId);
+                  if (subAgent) {
+                     const subAgentInstruction = `
+                       ${subAgent.systemPrompt}
+                       ${subAgent.useRAG && context ? `\n\nCONTEXT:\n${context}` : ''}
+                     `;
+                     const subResult = await ai.models.generateContent({
+                       model: "gemini-2.5-flash",
+                       contents: [{ role: 'user', parts: [{ text: instruction }] }],
+                       config: { systemInstruction: subAgentInstruction }
+                     });
+                     functionResultData = { specialist_response: subResult.text };
+                  } else {
+                     functionResultData = { error: "Specialist not found" };
+                  }
+              }
+
+              // Append response to history and loop again
+              modelInputs.push({
+                 role: "user",
+                 parts: [{ functionResponse: { name: call.name, response: functionResultData } }]
+              });
+
             } else {
-               aiResponse = "I tried to consult a specialist but couldn't find them.";
+              aiResponse = result.text || "";
+              break; // Output generated
             }
-
-          } else {
-            // Normal response
-            aiResponse = result.text || "";
           }
+
+          if(!aiResponse) aiResponse = "Estou processando as informações, por favor aguarde...";
+
 
           // Apply Delay
           if (agentData.responseDelayMs > 0) {

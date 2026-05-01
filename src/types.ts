@@ -79,5 +79,25 @@ export interface AIAgent {
   responseDelayMs?: number;
   useTyping?: boolean;
   callOtherAgents?: boolean;
+  tools_enabled?: string[];
+  catalogs?: string[];
   createdAt: any;
+}
+
+export interface Catalog {
+  id: string;
+  userId: string;
+  name: string;
+  currency: string;
+  items: CatalogItem[];
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface CatalogItem {
+  id: string;
+  name: string;
+  price: number;
+  duration_min?: number;
+  description?: string;
 }

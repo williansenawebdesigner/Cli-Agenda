@@ -46,6 +46,15 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Catalog Rules
+    match /catalogs/{catalogId} {
+      allow read, write: if true;
+    }
+
+    match /clients/{clientId} {
+      allow read, write: if true;
+    }
+
     // WhatsApp Instance Rules
     match /whatsapp_instances/{instanceId} {
       allow read, write: if true;
